@@ -215,6 +215,22 @@ export default function App() {
     setUser(data);
   }
 
+  async function downloadCsv() {
+    setError("");
+    const res = await api("/export/tickets.csv");
+    if (!res.ok) {
+      setError("Export failed");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tickets.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleLogout() {
     await api("/auth/logout", { method: "POST" });
     setUser(null);
@@ -299,7 +315,6 @@ export default function App() {
           <button onClick={handleLogout}>Log out</button>
         </div>
       </div>
-
       <form onSubmit={handleSubmit} style={{ display: "grid", gap: 8 }}>
         <input
           placeholder="Title"
@@ -321,7 +336,10 @@ export default function App() {
       </form>
       {error && <p style={{ color: "red" }}>{error}</p>}
       {canManage && <Dashboard refresh={tickets} />}
-      <h2>Tickets ({tickets.length})</h2>
+      <h2>
+        Tickets ({tickets.length}){" "}
+        {canManage && <button onClick={downloadCsv}>Export CSV</button>}
+      </h2>{" "}
       {tickets.map((t) => (
         <div
           key={t.id}

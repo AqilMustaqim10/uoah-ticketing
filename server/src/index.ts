@@ -455,6 +455,75 @@ app.get("/stats", requireAuth, requireRole("ADMIN", "IT"), async (req, res) => {
   }
 });
 
+// ---------- CSV export (IT and ADMIN only) ----------
+
+function csvCell(value: unknown): string {
+  let s = value === null || value === undefined ? "" : String(value);
+  s = s.replace(/\r?\n/g, " ");
+  // Stop Excel running formulas that came from ticket text
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+app.get(
+  "/export/tickets.csv",
+  requireAuth,
+  requireRole("ADMIN", "IT"),
+  async (req, res) => {
+    const scope = ticketScope(req.user!, 1);
+    try {
+      const result = await pool.query(
+        `SELECT t.id, t.title, t.status, t.priority, bu.code AS unit,
+              t.source, t.requester_email, t.created_at
+       FROM tickets t
+       LEFT JOIN business_units bu ON bu.id = t.business_unit_id
+       WHERE ${scope.sql}
+       ORDER BY t.id`,
+        scope.params,
+      );
+
+      const header = [
+        "ID",
+        "Title",
+        "Status",
+        "Priority",
+        "Unit",
+        "Source",
+        "Requester email",
+        "Created",
+      ];
+      const lines = [header.map(csvCell).join(",")];
+      for (const r of result.rows) {
+        lines.push(
+          [
+            r.id,
+            r.title,
+            r.status,
+            r.priority,
+            r.unit,
+            r.source,
+            r.requester_email,
+            new Date(r.created_at).toISOString(),
+          ]
+            .map(csvCell)
+            .join(","),
+        );
+      }
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        'attachment; filename="tickets.csv"',
+      );
+      // The BOM makes Excel read accents and other characters correctly
+      res.send("\uFEFF" + lines.join("\r\n"));
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Database error" });
+    }
+  },
+);
+
 const PORT = process.env.PORT ?? 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
