@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import Dashboard from "./Dashboard";
+import Shell, { loadTab, saveTab } from "./Shell";
+import type { Tab } from "./Shell";
 
 const API = "http://localhost:3000";
 
@@ -181,6 +183,12 @@ export default function App() {
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("MEDIUM");
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<Tab>("tickets");
+
+  function go(next: Tab) {
+    setTab(next);
+    saveTab(next);
+  }
 
   useEffect(() => {
     api("/auth/me")
@@ -190,8 +198,9 @@ export default function App() {
       .finally(() => setChecking(false));
   }, []);
 
+  // When a user becomes known (login or page refresh), restore their last tab
   useEffect(() => {
-    if (user) loadTickets();
+    if (user) setTab(loadTab(user.role));
   }, [user]);
 
   async function loadTickets() {
@@ -304,69 +313,97 @@ export default function App() {
 
   const canManage = user.role === "ADMIN" || user.role === "IT";
 
-  return (
-    <div
-      style={{ maxWidth: 700, margin: "2rem auto", fontFamily: "sans-serif" }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h1>UOA Helpdesk</h1>
-        <div>
-          {user.name} ({user.role}, {user.unitCode ?? "no unit"}){" "}
-          <button onClick={handleLogout}>Log out</button>
-        </div>
-      </div>
-      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 8 }}>
-        <input
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <textarea
-          placeholder="Describe the problem"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-        <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-          <option>LOW</option>
-          <option>MEDIUM</option>
-          <option>HIGH</option>
-          <option>URGENT</option>
-        </select>
-        <button type="submit">Create ticket</button>
-      </form>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {canManage && <Dashboard refresh={tickets} />}
-      <h2>
-        Tickets ({tickets.length}){" "}
-        {canManage && <button onClick={downloadCsv}>Export CSV</button>}
-      </h2>{" "}
-      {tickets.map((t) => (
-        <div
-          key={t.id}
-          style={{ border: "1px solid #ccc", padding: 8, marginBottom: 8 }}
-        >
-          <strong>
-            #{t.id} {t.title}
-          </strong>{" "}
-          [{t.priority}] ({t.status}) {t.unit_code}
-          <p>{t.description}</p>
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            {canManage &&
-              TRANSITIONS[t.status]?.map((next) => (
-                <button key={next} onClick={() => changeStatus(t.id, next)}>
-                  Move to {next}
-                </button>
-              ))}
-            <button onClick={() => setOpenId(openId === t.id ? null : t.id)}>
-              {openId === t.id ? "Hide details" : "Details"}
-            </button>
-          </div>
-          <small>{new Date(t.created_at).toLocaleString()}</small>
-          {openId === t.id && (
-            <TicketDetail ticketId={t.id} canManage={canManage} />
-          )}
-        </div>
-      ))}
+  const comingSoon = (title: string) => (
+    <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
+      <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+      <p className="text-slate-500 mt-1">
+        This screen is built in a later step.
+      </p>
     </div>
+  );
+
+  return (
+    <Shell
+      user={user}
+      active={tab}
+      onNavigate={go}
+      onCreateTicket={() => go("tickets")}
+      onLogout={handleLogout}
+    >
+      {tab === "dashboard" &&
+        (canManage ? <Dashboard refresh={tickets} /> : null)}
+
+      {tab === "tickets" && (
+        <div style={{ maxWidth: 700 }}>
+          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 8 }}>
+            <input
+              placeholder="Title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <textarea
+              placeholder="Describe the problem"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+            >
+              <option>LOW</option>
+              <option>MEDIUM</option>
+              <option>HIGH</option>
+              <option>URGENT</option>
+            </select>
+            <button type="submit">Create ticket</button>
+          </form>
+          {error && <p style={{ color: "red" }}>{error}</p>}
+
+          <h2>
+            Tickets ({tickets.length}){" "}
+            {canManage && <button onClick={downloadCsv}>Export CSV</button>}
+          </h2>
+          {tickets.map((t) => (
+            <div
+              key={t.id}
+              style={{
+                border: "1px solid #ccc",
+                padding: 8,
+                marginBottom: 8,
+                background: "white",
+              }}
+            >
+              <strong>
+                #{t.id} {t.title}
+              </strong>{" "}
+              [{t.priority}] ({t.status}) {t.unit_code}
+              <p>{t.description}</p>
+              <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                {canManage &&
+                  TRANSITIONS[t.status]?.map((next) => (
+                    <button key={next} onClick={() => changeStatus(t.id, next)}>
+                      Move to {next}
+                    </button>
+                  ))}
+                <button
+                  onClick={() => setOpenId(openId === t.id ? null : t.id)}
+                >
+                  {openId === t.id ? "Hide details" : "Details"}
+                </button>
+              </div>
+              <small>{new Date(t.created_at).toLocaleString()}</small>
+              {openId === t.id && (
+                <TicketDetail ticketId={t.id} canManage={canManage} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "kb" && comingSoon("Knowledge Base")}
+      {tab === "email" && comingSoon("Email Integration Hub")}
+      {tab === "users" && comingSoon("User Directory")}
+      {tab === "settings" && comingSoon("Settings")}
+    </Shell>
   );
 }
