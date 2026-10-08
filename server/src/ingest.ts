@@ -4,12 +4,13 @@ import { getNewMail } from "./newmail";
 import { decide } from "./classify";
 import { sendTicketAck, sendRejection } from "./mailer";
 import type { ParsedMail } from "./pop3";
+import { cleanEmailBody } from "./cleaner";
 
 const MAX_BODY = 5000;
 
 // Light cleanup for now. Stage 9G does the real signature stripping.
 function cleanBody(text: string): string {
-  return text.trim().slice(0, MAX_BODY);
+  return cleanEmailBody(text).slice(0, MAX_BODY);
 }
 
 function cleanSubject(subject: string): string {
@@ -73,12 +74,13 @@ export async function processMail(mail: ParsedMail): Promise<string> {
       summary = `ignored: ${decision.reason}`;
     } else if (decision.action === "REPLY") {
       const c = await client.query(
-        `INSERT INTO comments (ticket_id, author_id, body, is_internal)
-         VALUES ($1, $2, $3, FALSE) RETURNING id`,
+        `INSERT INTO comments (ticket_id, author_id, body, is_internal, raw_body)
+         VALUES ($1, $2, $3, FALSE, $4) RETURNING id`,
         [
           decision.ticketId,
           decision.senderUserId,
           cleanBody(mail.text) || "(empty email)",
+          mail.text.slice(0, 20000),
         ],
       );
       await audit(
@@ -142,8 +144,8 @@ export async function processMail(mail: ParsedMail): Promise<string> {
       const title = cleanSubject(mail.subject) || "(no subject)";
 
       const t = await client.query(
-        `INSERT INTO tickets (title, description, priority, created_by, business_unit_id, source, requester_email)
-         VALUES ($1, $2, 'MEDIUM', $3, $4, 'EMAIL', $5)
+        `INSERT INTO tickets (title, description, priority, created_by, business_unit_id, source, requester_email, raw_body)
+         VALUES ($1, $2, 'MEDIUM', $3, $4, 'EMAIL', $5, $6)
          RETURNING id, title, priority`,
         [
           title,
@@ -151,6 +153,7 @@ export async function processMail(mail: ParsedMail): Promise<string> {
           requesterId,
           unit.rows[0].business_unit_id,
           mail.from,
+          mail.text.slice(0, 20000),
         ],
       );
       const ticket = t.rows[0];
