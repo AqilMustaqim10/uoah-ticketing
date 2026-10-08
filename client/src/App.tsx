@@ -16,9 +16,15 @@ type Ticket = {
   status: string;
   priority: string;
   created_at: string;
+  unit_code: string | null;
 };
 
-type User = { id: number; name: string; role: "ADMIN" | "IT" | "USER" };
+type User = {
+  id: number;
+  name: string;
+  role: "ADMIN" | "IT" | "USER";
+  unitCode: string | null;
+};
 
 // Every request sends the login cookie automatically
 function api(path: string, options: RequestInit = {}) {
@@ -153,7 +159,7 @@ export default function App() {
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <h1>UOA Helpdesk</h1>
         <div>
-          {user.name} ({user.role}){" "}
+          {user.name} ({user.role}, {user.unitCode ?? "no unit"}){" "}
           <button onClick={handleLogout}>Log out</button>
         </div>
       </div>
@@ -188,7 +194,8 @@ export default function App() {
           <strong>
             #{t.id} {t.title}
           </strong>{" "}
-          [{t.priority}] ({t.status})<p>{t.description}</p>
+          [{t.priority}] ({t.status}) {t.unit_code}
+          <p>{t.description}</p>
           {canManage && (
             <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
               {TRANSITIONS[t.status]?.map((next) => (

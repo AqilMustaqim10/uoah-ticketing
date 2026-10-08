@@ -3,7 +3,13 @@ import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
 export type Role = "ADMIN" | "IT" | "USER";
-export type AuthUser = { id: number; name: string; role: Role };
+export type AuthUser = {
+  id: number;
+  name: string;
+  role: Role;
+  businessUnitId: number | null;
+  unitCode: string | null;
+};
 
 declare global {
   namespace Express {
@@ -19,11 +25,7 @@ if (!JWT_SECRET) {
 }
 
 export function signToken(user: AuthUser): string {
-  return jwt.sign(
-    { id: user.id, name: user.name, role: user.role },
-    JWT_SECRET as string,
-    { expiresIn: "8h" },
-  );
+  return jwt.sign(user, JWT_SECRET as string, { expiresIn: "8h" });
 }
 
 // Gate 1: must be logged in
@@ -33,8 +35,14 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: "Not logged in" });
   }
   try {
-    const payload = jwt.verify(token, JWT_SECRET as string) as AuthUser;
-    req.user = { id: payload.id, name: payload.name, role: payload.role };
+    const p = jwt.verify(token, JWT_SECRET as string) as AuthUser;
+    req.user = {
+      id: p.id,
+      name: p.name,
+      role: p.role,
+      businessUnitId: p.businessUnitId ?? null,
+      unitCode: p.unitCode ?? null,
+    };
     next();
   } catch {
     res.status(401).json({ error: "Session expired, please log in again" });
