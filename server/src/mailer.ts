@@ -63,3 +63,24 @@ export async function sendTicketAck(ticket: TicketInfo, requesterId: number) {
     },
   });
 }
+
+export async function sendRejection(to: string) {
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM,
+    to,
+    // No [HD-n] in the subject on purpose, so a reply can never thread onto a ticket
+    subject: "We could not create your IT request",
+    text:
+      "Hello,\n\n" +
+      "We received your email, but your address is not registered in the IT Helpdesk, " +
+      "so no ticket was created.\n\n" +
+      "Please ask the IT department to create an account for you, " +
+      "then send your request again.\n\n" +
+      "This is an automatic message. Please do not reply to it.\n",
+    headers: {
+      "Auto-Submitted": "auto-replied",
+      Precedence: "bulk",
+      "X-Auto-Response-Suppress": "All",
+    },
+  });
+}
