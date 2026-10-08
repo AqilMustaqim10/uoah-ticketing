@@ -7,6 +7,7 @@ import type { PoolClient } from "pg";
 import { pool } from "./db";
 import { requireAuth, requireRole, signToken } from "./auth";
 import type { AuthUser } from "./auth";
+import { sendTicketAck } from "./mailer";
 
 const app = express();
 
@@ -220,6 +221,11 @@ app.post("/tickets", requireAuth, async (req, res) => {
       return created;
     });
     res.status(201).json(ticket);
+
+    // Send the acknowledgment AFTER responding. If email fails, the ticket still exists.
+    sendTicketAck(ticket, user.id).catch((err) =>
+      console.error("Acknowledgment email failed:", err.message),
+    );
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Database error" });
