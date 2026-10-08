@@ -14,14 +14,17 @@
     "dotenv": "^18.0.6",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.3",
+    "mailparser": "^3.9.36",
     "nodemailer": "^10.0.16",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "poplib": "^0.1.7"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
