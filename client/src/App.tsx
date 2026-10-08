@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Dashboard from "./Dashboard";
 
 const API = "http://localhost:3000";
 
@@ -319,7 +320,7 @@ export default function App() {
         <button type="submit">Create ticket</button>
       </form>
       {error && <p style={{ color: "red" }}>{error}</p>}
-
+      {canManage && <Dashboard refresh={tickets} />}
       <h2>Tickets ({tickets.length})</h2>
       {tickets.map((t) => (
         <div

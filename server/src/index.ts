@@ -394,6 +394,67 @@ app.get(
   },
 );
 
+// ---------- Dashboard stats (IT and ADMIN only) ----------
+
+app.get("/stats", requireAuth, requireRole("ADMIN", "IT"), async (req, res) => {
+  const scope = ticketScope(req.user!, 1);
+
+  // Hours allowed before a ticket counts as overdue, by priority
+  const OVERDUE = `
+    t.status IN ('OPEN', 'IN_PROGRESS')
+    AND t.created_at < now() - (CASE t.priority
+      WHEN 'URGENT' THEN interval '4 hours'
+      WHEN 'HIGH'   THEN interval '8 hours'
+      WHEN 'MEDIUM' THEN interval '24 hours'
+      ELSE interval '72 hours' END)
+  `;
+
+  try {
+    const [byStatus, byPriority, byUnit, overdue, overdueList] =
+      await Promise.all([
+        pool.query(
+          `SELECT t.status AS key, count(*)::int AS n
+         FROM tickets t WHERE ${scope.sql} GROUP BY t.status`,
+          scope.params,
+        ),
+        pool.query(
+          `SELECT t.priority AS key, count(*)::int AS n
+         FROM tickets t WHERE ${scope.sql} GROUP BY t.priority`,
+          scope.params,
+        ),
+        pool.query(
+          `SELECT COALESCE(bu.code, 'none') AS key, count(*)::int AS n
+         FROM tickets t
+         LEFT JOIN business_units bu ON bu.id = t.business_unit_id
+         WHERE ${scope.sql} GROUP BY bu.code`,
+          scope.params,
+        ),
+        pool.query(
+          `SELECT count(*)::int AS n FROM tickets t WHERE ${scope.sql} AND ${OVERDUE}`,
+          scope.params,
+        ),
+        pool.query(
+          `SELECT t.id FROM tickets t WHERE ${scope.sql} AND ${OVERDUE} ORDER BY t.id`,
+          scope.params,
+        ),
+      ]);
+
+    const toMap = (rows: { key: string; n: number }[]) =>
+      Object.fromEntries(rows.map((r) => [r.key, r.n]));
+
+    res.json({
+      byStatus: toMap(byStatus.rows),
+      byPriority: toMap(byPriority.rows),
+      byUnit: toMap(byUnit.rows),
+      overdue: overdue.rows[0].n,
+      overdueIds: overdueList.rows.map((r) => r.id),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
 const PORT = process.env.PORT ?? 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
