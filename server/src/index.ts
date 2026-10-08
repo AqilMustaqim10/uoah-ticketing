@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import bcrypt from "bcryptjs";
+import type { PoolClient } from "pg";
 import { pool } from "./db";
 import { requireAuth, requireRole, signToken } from "./auth";
 import type { AuthUser } from "./auth";
@@ -16,6 +17,43 @@ app.use(cookieParser());
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
+
+// ---------- Helpers ----------
+
+// Runs several queries as ONE unit: all succeed, or none are saved.
+async function inTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Writes one line to the audit log. Always called inside a transaction.
+async function audit(
+  client: PoolClient,
+  ticketId: number,
+  actorId: number,
+  action: string,
+  details: Record<string, unknown> = {},
+) {
+  await client.query(
+    `INSERT INTO audit_log (ticket_id, actor_id, action, details)
+     VALUES ($1, $2, $3, $4)`,
+    [ticketId, actorId, action, JSON.stringify(details)],
+  );
+}
+
+type Outcome = { code: number; body: unknown };
 
 // ---------- Auth ----------
 
@@ -78,7 +116,6 @@ function ticketScope(user: AuthUser, paramIndex: number) {
     return { sql: "TRUE", params: [] as unknown[] };
   }
   if (user.role === "IT") {
-    // If an IT user somehow has no unit, match nothing (fail closed)
     if (user.businessUnitId === null) {
       return { sql: "FALSE", params: [] as unknown[] };
     }
@@ -88,6 +125,16 @@ function ticketScope(user: AuthUser, paramIndex: number) {
     };
   }
   return { sql: `t.created_by = $${paramIndex}`, params: [user.id] };
+}
+
+// Is this ticket inside the user's scope? Used by comments and audit routes.
+async function findScopedTicket(user: AuthUser, id: number): Promise<boolean> {
+  const scope = ticketScope(user, 2);
+  const result = await pool.query(
+    `SELECT t.id FROM tickets t WHERE t.id = $1 AND ${scope.sql}`,
+    [id, ...scope.params],
+  );
+  return result.rows.length > 0;
 }
 
 const TICKET_SELECT = `
@@ -133,7 +180,6 @@ app.get("/tickets/:id", requireAuth, async (req, res) => {
       `${TICKET_SELECT} WHERE t.id = $1 AND ${scope.sql}`,
       [id, ...scope.params],
     );
-    // 404 for "not yours" too, so we never reveal that it exists
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Ticket not found" });
     }
@@ -159,14 +205,21 @@ app.post("/tickets", requireAuth, async (req, res) => {
   }
 
   try {
-    // The unit comes from the logged-in user, NEVER from the browser's request
-    const result = await pool.query(
-      `INSERT INTO tickets (title, description, priority, created_by, business_unit_id)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [title.trim(), description, priority, user.id, user.businessUnitId],
-    );
-    res.status(201).json(result.rows[0]);
+    const ticket = await inTransaction(async (client) => {
+      const result = await client.query(
+        `INSERT INTO tickets (title, description, priority, created_by, business_unit_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [title.trim(), description, priority, user.id, user.businessUnitId],
+      );
+      const created = result.rows[0];
+      await audit(client, created.id, user.id, "TICKET_CREATED", {
+        title: created.title,
+        priority,
+      });
+      return created;
+    });
+    res.status(201).json(ticket);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Database error" });
@@ -178,6 +231,7 @@ app.patch(
   requireAuth,
   requireRole("ADMIN", "IT"),
   async (req, res) => {
+    const user = req.user!;
     const id = Number(req.params.id);
     const { status } = req.body;
 
@@ -188,29 +242,145 @@ app.patch(
       return res.status(400).json({ error: "Invalid status" });
     }
 
-    const scope = ticketScope(req.user!, 2);
+    const scope = ticketScope(user, 2);
     try {
-      // Only finds the ticket if it is inside this user's scope
-      const current = await pool.query(
-        `SELECT t.status FROM tickets t WHERE t.id = $1 AND ${scope.sql}`,
-        [id, ...scope.params],
+      const outcome: Outcome = await inTransaction(async (client) => {
+        // FOR UPDATE locks the row so two people can't change it at the same moment
+        const current = await client.query(
+          `SELECT t.status FROM tickets t WHERE t.id = $1 AND ${scope.sql} FOR UPDATE`,
+          [id, ...scope.params],
+        );
+        if (current.rows.length === 0) {
+          return { code: 404, body: { error: "Ticket not found" } };
+        }
+
+        const from: string = current.rows[0].status;
+        if (!TRANSITIONS[from].includes(status)) {
+          return {
+            code: 400,
+            body: { error: `Cannot change from ${from} to ${status}` },
+          };
+        }
+
+        const updated = await client.query(
+          "UPDATE tickets SET status = $1 WHERE id = $2 RETURNING *",
+          [status, id],
+        );
+        await audit(client, id, user.id, "STATUS_CHANGED", {
+          from,
+          to: status,
+        });
+        return { code: 200, body: updated.rows[0] };
+      });
+      res.status(outcome.code).json(outcome.body);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Database error" });
+    }
+  },
+);
+
+// ---------- Comments ----------
+
+app.get("/tickets/:id/comments", requireAuth, async (req, res) => {
+  const user = req.user!;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: "Invalid ticket id" });
+  }
+
+  try {
+    if (!(await findScopedTicket(user, id))) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+    // Requesters must never receive internal notes. Filtered here on the server.
+    const hideInternal = user.role === "USER";
+    const result = await pool.query(
+      `SELECT c.id, c.body, c.is_internal, c.created_at,
+              u.name AS author_name, u.role AS author_role
+       FROM comments c
+       JOIN users u ON u.id = c.author_id
+       WHERE c.ticket_id = $1 ${hideInternal ? "AND c.is_internal = FALSE" : ""}
+       ORDER BY c.id ASC`,
+      [id],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.post("/tickets/:id/comments", requireAuth, async (req, res) => {
+  const user = req.user!;
+  const id = Number(req.params.id);
+  const { body, internal = false } = req.body;
+
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: "Invalid ticket id" });
+  }
+  if (typeof body !== "string" || body.trim() === "") {
+    return res.status(400).json({ error: "Comment cannot be empty" });
+  }
+  if (body.length > 5000) {
+    return res
+      .status(400)
+      .json({ error: "Comment is too long (max 5000 characters)" });
+  }
+  if (internal === true && user.role === "USER") {
+    return res.status(403).json({ error: "You do not have permission" });
+  }
+
+  try {
+    if (!(await findScopedTicket(user, id))) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    const comment = await inTransaction(async (client) => {
+      const result = await client.query(
+        `INSERT INTO comments (ticket_id, author_id, body, is_internal)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [id, user.id, body.trim(), internal === true],
       );
-      if (current.rows.length === 0) {
+      await audit(client, id, user.id, "COMMENT_ADDED", {
+        commentId: result.rows[0].id,
+        internal: internal === true,
+      });
+      return result.rows[0];
+    });
+    res.status(201).json(comment);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// ---------- Audit history (IT and ADMIN only) ----------
+
+app.get(
+  "/tickets/:id/audit",
+  requireAuth,
+  requireRole("ADMIN", "IT"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ error: "Invalid ticket id" });
+    }
+
+    try {
+      if (!(await findScopedTicket(req.user!, id))) {
         return res.status(404).json({ error: "Ticket not found" });
       }
-
-      const from: string = current.rows[0].status;
-      if (!TRANSITIONS[from].includes(status)) {
-        return res
-          .status(400)
-          .json({ error: `Cannot change from ${from} to ${status}` });
-      }
-
       const result = await pool.query(
-        "UPDATE tickets SET status = $1 WHERE id = $2 RETURNING *",
-        [status, id],
+        `SELECT a.id, a.action, a.details, a.created_at, u.name AS actor_name
+         FROM audit_log a
+         LEFT JOIN users u ON u.id = a.actor_id
+         WHERE a.ticket_id = $1
+         ORDER BY a.id ASC`,
+        [id],
       );
-      res.json(result.rows[0]);
+      res.json(result.rows);
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Database error" });
