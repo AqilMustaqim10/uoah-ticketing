@@ -84,3 +84,29 @@ export async function sendRejection(to: string) {
     },
   });
 }
+
+export async function sendCodeEmail(
+  to: string,
+  code: string,
+  purpose: "SIGNUP" | "RESET",
+  minutes: number,
+) {
+  const what =
+    purpose === "SIGNUP" ? "verify your email" : "reset your password";
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM,
+    to,
+    // No [HD-n] in the subject, so a reply can never thread onto a ticket
+    subject: `Your UOA Helpdesk code: ${code}`,
+    text:
+      `Use this code to ${what}:\n\n` +
+      `    ${code}\n\n` +
+      `It expires in ${minutes} minutes. If you did not ask for it, ignore this email.\n` +
+      `Never share this code with anyone.\n`,
+    headers: {
+      "Auto-Submitted": "auto-generated",
+      Precedence: "bulk",
+      "X-Auto-Response-Suppress": "All",
+    },
+  });
+}

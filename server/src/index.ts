@@ -8,12 +8,14 @@ import { pool } from "./db";
 import { requireAuth, requireRole, signToken } from "./auth";
 import type { AuthUser } from "./auth";
 import { sendTicketAck } from "./mailer";
+import { accountsRouter } from "./accounts";
 
 const app = express();
 
 app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
+app.use("/auth", accountsRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });

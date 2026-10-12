@@ -4,6 +4,7 @@ import Shell, { loadTab, saveTab } from "./Shell";
 import type { Tab } from "./Shell";
 import { StatusBadge, PriorityBadge } from "./Badges";
 import TicketModal from "./TicketModal";
+import AuthScreen from "./AuthScreen";
 
 const API = "http://localhost:3000";
 
@@ -36,9 +37,6 @@ function api(path: string, options: RequestInit = {}) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -74,22 +72,6 @@ export default function App() {
   useEffect(() => {
     if (user) loadTickets();
   }, [user]);
-
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    const res = await api("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? "Login failed");
-      return;
-    }
-    setPassword("");
-    setUser(data);
-  }
 
   async function downloadCsv() {
     setError("");
@@ -135,39 +117,7 @@ export default function App() {
   if (checking) return <p>Loading...</p>;
 
   if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-50 grid place-items-center p-4">
-        <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-xs p-6">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white grid place-items-center font-bold mb-4">
-            U
-          </div>
-          <h1 className="text-xl font-semibold text-slate-900">UOA Helpdesk</h1>
-          <p className="text-sm text-slate-500 mb-4">Sign in to continue</p>
-          <form onSubmit={handleLogin} className="space-y-3">
-            <input
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <input
-              type="password"
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
-            >
-              Log in
-            </button>
-            {error && <p className="text-sm text-rose-600">{error}</p>}
-          </form>
-        </div>
-      </div>
-    );
+    return <AuthScreen onLoggedIn={setUser} />;
   }
 
   const canManage = user.role === "ADMIN" || user.role === "IT";
