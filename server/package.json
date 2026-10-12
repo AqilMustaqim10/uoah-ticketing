@@ -17,6 +17,7 @@
     "express-rate-limit": "^8.7.1",
     "jsonwebtoken": "^9.0.3",
     "mailparser": "^3.9.36",
+    "multer": "^2.4.0",
     "nodemailer": "^10.0.16",
     "pg": "^8.23.1",
     "poplib": "^0.1.7"

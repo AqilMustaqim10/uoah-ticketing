@@ -6,6 +6,7 @@ import { StatusBadge, PriorityBadge } from "./Badges";
 import TicketModal from "./TicketModal";
 import AuthScreen from "./AuthScreen";
 import UsersPage from "./UsersPage";
+import KnowledgeBase from "./KnowledgeBase";
 
 const API = "http://localhost:3000";
 
@@ -337,7 +338,15 @@ export default function App() {
           )}
         </div>
       )}
-      {tab === "kb" && comingSoon("Knowledge Base")}
+      {tab === "kb" && (
+        <KnowledgeBase
+          me={{
+            id: user.id,
+            role: user.role,
+            businessUnitId: user.businessUnitId ?? null,
+          }}
+        />
+      )}
       {tab === "email" && comingSoon("Email Integration Hub")}
       {tab === "users" && user.role === "ADMIN" && (
         <UsersPage meId={user.id} />

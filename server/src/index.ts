@@ -10,6 +10,7 @@ import type { AuthUser } from "./auth";
 import { sendTicketAck } from "./mailer";
 import { accountsRouter } from "./accounts";
 import { adminRouter } from "./adminUsers";
+import { kbRouter } from "./kb";
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use("/auth", accountsRouter);
 app.use("/admin", adminRouter);
+app.use("/kb", kbRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
