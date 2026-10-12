@@ -3,15 +3,9 @@ import Dashboard from "./Dashboard";
 import Shell, { loadTab, saveTab } from "./Shell";
 import type { Tab } from "./Shell";
 import { StatusBadge, PriorityBadge } from "./Badges";
+import TicketModal from "./TicketModal";
 
 const API = "http://localhost:3000";
-
-const TRANSITIONS: Record<string, string[]> = {
-  OPEN: ["IN_PROGRESS"],
-  IN_PROGRESS: ["RESOLVED", "OPEN"],
-  RESOLVED: ["CLOSED", "IN_PROGRESS"],
-  CLOSED: [],
-};
 
 type Ticket = {
   id: number;
@@ -30,23 +24,6 @@ type User = {
   unitCode: string | null;
 };
 
-type Comment = {
-  id: number;
-  body: string;
-  is_internal: boolean;
-  created_at: string;
-  author_name: string;
-  author_role: string;
-};
-
-type AuditEntry = {
-  id: number;
-  action: string;
-  details: Record<string, unknown>;
-  created_at: string;
-  actor_name: string | null;
-};
-
 // Every request sends the login cookie automatically
 function api(path: string, options: RequestInit = {}) {
   return fetch(`${API}${path}`, {
@@ -54,121 +31,6 @@ function api(path: string, options: RequestInit = {}) {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
   });
-}
-
-function describe(entry: AuditEntry): string {
-  const d = entry.details;
-  switch (entry.action) {
-    case "TICKET_CREATED":
-      return "created the ticket";
-    case "STATUS_CHANGED":
-      return `changed status from ${d.from} to ${d.to}`;
-    case "COMMENT_ADDED":
-      return d.internal ? "added an internal note" : "added a comment";
-    default:
-      return entry.action;
-  }
-}
-
-function TicketDetail({
-  ticketId,
-  canManage,
-}: {
-  ticketId: number;
-  canManage: boolean;
-}) {
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [history, setHistory] = useState<AuditEntry[]>([]);
-  const [body, setBody] = useState("");
-  const [internal, setInternal] = useState(false);
-  const [error, setError] = useState("");
-
-  async function load() {
-    const c = await api(`/tickets/${ticketId}/comments`);
-    if (c.ok) setComments(await c.json());
-    if (canManage) {
-      const a = await api(`/tickets/${ticketId}/audit`);
-      if (a.ok) setHistory(await a.json());
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, [ticketId]);
-
-  async function addComment(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    const res = await api(`/tickets/${ticketId}/comments`, {
-      method: "POST",
-      body: JSON.stringify({ body, internal }),
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      setError(data.error ?? "Something went wrong");
-      return;
-    }
-    setBody("");
-    setInternal(false);
-    load();
-  }
-
-  return (
-    <div style={{ background: "#f6f6f6", padding: 8, marginTop: 8 }}>
-      <h4>Comments</h4>
-      {comments.length === 0 && <p>No comments yet.</p>}
-      {comments.map((c) => (
-        <div
-          key={c.id}
-          style={{
-            padding: 6,
-            marginBottom: 4,
-            background: c.is_internal ? "#fff4cc" : "white",
-            border: "1px solid #ddd",
-          }}
-        >
-          <strong>{c.author_name}</strong> ({c.author_role})
-          {c.is_internal && " 🔒 internal note"}
-          <div>{c.body}</div>
-          <small>{new Date(c.created_at).toLocaleString()}</small>
-        </div>
-      ))}
-
-      <form onSubmit={addComment} style={{ display: "grid", gap: 6 }}>
-        <textarea
-          placeholder="Write a comment"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-        />
-        {canManage && (
-          <label>
-            <input
-              type="checkbox"
-              checked={internal}
-              onChange={(e) => setInternal(e.target.checked)}
-            />{" "}
-            Internal note (requester cannot see)
-          </label>
-        )}
-        <button type="submit">Add comment</button>
-        {error && <span style={{ color: "red" }}>{error}</span>}
-      </form>
-
-      {canManage && (
-        <>
-          <h4>History</h4>
-          {history.map((h) => (
-            <div key={h.id}>
-              <small>
-                {new Date(h.created_at).toLocaleString()}:{" "}
-                <strong>{h.actor_name}</strong> {describe(h)}
-              </small>
-            </div>
-          ))}
-        </>
-      )}
-    </div>
-  );
 }
 
 export default function App() {
@@ -208,6 +70,10 @@ export default function App() {
     const res = await api("/tickets");
     if (res.ok) setTickets(await res.json());
   }
+
+  useEffect(() => {
+    if (user) loadTickets();
+  }, [user]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -264,25 +130,6 @@ export default function App() {
     setDescription("");
     setPriority("MEDIUM");
     loadTickets();
-  }
-
-  async function changeStatus(id: number, status: string) {
-    setError("");
-    const res = await api(`/tickets/${id}/status`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      setError(data.error ?? "Something went wrong");
-      return;
-    }
-    await loadTickets();
-    // Re-open the panel so the history refreshes
-    if (openId === id) {
-      setOpenId(null);
-      setTimeout(() => setOpenId(id), 0);
-    }
   }
 
   if (checking) return <p>Loading...</p>;
@@ -417,59 +264,28 @@ export default function App() {
                 </thead>
                 <tbody>
                   {tickets.map((t) => (
-                    <>
-                      <tr
-                        key={t.id}
-                        onClick={() => setOpenId(openId === t.id ? null : t.id)}
-                        className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
-                      >
-                        <td className="px-4 py-2 font-mono text-slate-600">
-                          HD-{t.id}
-                        </td>
-                        <td className="px-4 py-2 text-slate-900">{t.title}</td>
-                        <td className="px-4 py-2 text-slate-600">
-                          {t.unit_code}
-                        </td>
-                        <td className="px-4 py-2">
-                          <PriorityBadge priority={t.priority} />
-                        </td>
-                        <td className="px-4 py-2">
-                          <StatusBadge status={t.status} />
-                        </td>
-                        <td className="px-4 py-2 text-slate-500">
-                          {new Date(t.created_at).toLocaleDateString()}
-                        </td>
-                      </tr>
-                      {openId === t.id && (
-                        <tr
-                          key={`d${t.id}`}
-                          className="border-t border-slate-100 bg-slate-50"
-                        >
-                          <td colSpan={6} className="px-4 py-3">
-                            <p className="text-slate-700 whitespace-pre-wrap mb-3">
-                              {t.description}
-                            </p>
-                            {canManage && TRANSITIONS[t.status]?.length > 0 && (
-                              <div className="flex gap-2 mb-3">
-                                {TRANSITIONS[t.status].map((next) => (
-                                  <button
-                                    key={next}
-                                    onClick={() => changeStatus(t.id, next)}
-                                    className="px-3 py-1 text-xs rounded-lg border border-slate-200 bg-white hover:bg-slate-100"
-                                  >
-                                    Move to {next.replace("_", " ")}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                            <TicketDetail
-                              ticketId={t.id}
-                              canManage={canManage}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </>
+                    <tr
+                      key={t.id}
+                      onClick={() => setOpenId(t.id)}
+                      className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <td className="px-4 py-2 font-mono text-slate-600">
+                        HD-{t.id}
+                      </td>
+                      <td className="px-4 py-2 text-slate-900">{t.title}</td>
+                      <td className="px-4 py-2 text-slate-600">
+                        {t.unit_code}
+                      </td>
+                      <td className="px-4 py-2">
+                        <PriorityBadge priority={t.priority} />
+                      </td>
+                      <td className="px-4 py-2">
+                        <StatusBadge status={t.status} />
+                      </td>
+                      <td className="px-4 py-2 text-slate-500">
+                        {new Date(t.created_at).toLocaleDateString()}
+                      </td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -482,6 +298,19 @@ export default function App() {
       {tab === "email" && comingSoon("Email Integration Hub")}
       {tab === "users" && comingSoon("User Directory")}
       {tab === "settings" && comingSoon("Settings")}
+
+      {openId !== null &&
+        (() => {
+          const t = tickets.find((x) => x.id === openId);
+          return t ? (
+            <TicketModal
+              ticket={t}
+              canManage={canManage}
+              onClose={() => setOpenId(null)}
+              onChanged={loadTickets}
+            />
+          ) : null;
+        })()}
     </Shell>
   );
 }
