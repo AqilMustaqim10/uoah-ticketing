@@ -166,12 +166,68 @@ const TRANSITIONS: Record<string, string[]> = {
   CLOSED: [],
 };
 
+const STATUSES = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+
 app.get("/tickets", requireAuth, async (req, res) => {
-  const scope = ticketScope(req.user!, 1);
+  const user = req.user!;
+  const q = req.query;
+
+  const scope = ticketScope(user, 1);
+  const params: unknown[] = [...scope.params];
+  const where: string[] = [scope.sql];
+  const add = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  const status = typeof q.status === "string" ? q.status : "";
+  if (status) {
+    if (!STATUSES.includes(status))
+      return res.status(400).json({ error: "Invalid status" });
+    where.push(`t.status = ${add(status)}`);
+  }
+
+  const priority = typeof q.priority === "string" ? q.priority : "";
+  if (priority) {
+    if (!VALID_PRIORITIES.includes(priority))
+      return res.status(400).json({ error: "Invalid priority" });
+    where.push(`t.priority = ${add(priority)}`);
+  }
+
+  // Unit and assignee are only filters INSIDE the user's scope
+  const unit = typeof q.unit === "string" ? q.unit : "";
+  if (unit) {
+    const n = Number(unit);
+    if (!Number.isInteger(n))
+      return res.status(400).json({ error: "Invalid unit" });
+    where.push(`t.business_unit_id = ${add(n)}`);
+  }
+
+  const assignee = typeof q.assignee === "string" ? q.assignee : "";
+  if (assignee === "none") {
+    where.push("t.assigned_to IS NULL");
+  } else if (assignee) {
+    const n = Number(assignee);
+    if (!Number.isInteger(n))
+      return res.status(400).json({ error: "Invalid assignee" });
+    where.push(`t.assigned_to = ${add(n)}`);
+  }
+
+  const search = typeof q.q === "string" ? q.q.trim().slice(0, 100) : "";
+  if (search) {
+    const like = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+    const p = add(like);
+    const idMatch = search.match(/^(?:hd-)?(\d+)$/i);
+    const idClause = idMatch ? ` OR t.id = ${add(Number(idMatch[1]))}` : "";
+    where.push(
+      `(t.title ILIKE ${p} OR t.description ILIKE ${p} OR t.requester_email ILIKE ${p}${idClause})`,
+    );
+  }
+
   try {
     const result = await pool.query(
-      `${TICKET_SELECT} WHERE ${scope.sql} ORDER BY t.id DESC`,
-      scope.params,
+      `${TICKET_SELECT} WHERE ${where.join(" AND ")} ORDER BY t.id DESC LIMIT 500`,
+      params,
     );
     res.json(result.rows);
   } catch (err) {

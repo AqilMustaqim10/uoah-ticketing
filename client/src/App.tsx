@@ -46,6 +46,12 @@ export default function App() {
   const [priority, setPriority] = useState("MEDIUM");
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("tickets");
+  const [fSearch, setFSearch] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const [fPriority, setFPriority] = useState("");
+  const [fUnit, setFUnit] = useState("");
+  const [fAssignee, setFAssignee] = useState("");
+  const [unitList, setUnitList] = useState<{ id: number; code: string }[]>([]);
 
   function go(next: Tab) {
     setTab(next);
@@ -66,13 +72,29 @@ export default function App() {
   }, [user]);
 
   async function loadTickets() {
-    const res = await api("/tickets");
+    const p = new URLSearchParams();
+    if (fSearch.trim()) p.set("q", fSearch.trim());
+    if (fStatus) p.set("status", fStatus);
+    if (fPriority) p.set("priority", fPriority);
+    if (fUnit) p.set("unit", fUnit);
+    if (fAssignee) p.set("assignee", fAssignee);
+    const res = await api(`/tickets?${p.toString()}`);
     if (res.ok) setTickets(await res.json());
   }
 
+  // Reload when filters change. The short delay avoids a request on every keystroke.
   useEffect(() => {
-    if (user) loadTickets();
-  }, [user]);
+    if (!user) return;
+    const t = setTimeout(loadTickets, 250);
+    return () => clearTimeout(t);
+  }, [user, fSearch, fStatus, fPriority, fUnit, fAssignee]);
+
+  useEffect(() => {
+    fetch(`${API}/auth/units`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setUnitList)
+      .catch(() => setUnitList([]));
+  }, []);
 
   async function downloadCsv() {
     setError("");
@@ -195,9 +217,81 @@ export default function App() {
             {error && <p className="text-sm text-rose-600">{error}</p>}
           </form>
 
+          <div className="flex flex-wrap gap-2">
+            <input
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white flex-1 min-w-48"
+              placeholder="Search number, title, text or email"
+              value={fSearch}
+              onChange={(e) => setFSearch(e.target.value)}
+            />
+            <select
+              className="px-2 py-2 text-sm rounded-lg border border-slate-200 bg-white"
+              value={fStatus}
+              onChange={(e) => setFStatus(e.target.value)}
+            >
+              <option value="">All statuses</option>
+              <option value="OPEN">Open</option>
+              <option value="IN_PROGRESS">In progress</option>
+              <option value="RESOLVED">Resolved</option>
+              <option value="CLOSED">Closed</option>
+            </select>
+            <select
+              className="px-2 py-2 text-sm rounded-lg border border-slate-200 bg-white"
+              value={fPriority}
+              onChange={(e) => setFPriority(e.target.value)}
+            >
+              <option value="">All priorities</option>
+              <option>URGENT</option>
+              <option>HIGH</option>
+              <option>MEDIUM</option>
+              <option>LOW</option>
+            </select>
+            {user.role === "ADMIN" && (
+              <select
+                className="px-2 py-2 text-sm rounded-lg border border-slate-200 bg-white"
+                value={fUnit}
+                onChange={(e) => setFUnit(e.target.value)}
+              >
+                <option value="">All units</option>
+                {unitList.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.code}
+                  </option>
+                ))}
+              </select>
+            )}
+            {canManage && (
+              <select
+                className="px-2 py-2 text-sm rounded-lg border border-slate-200 bg-white"
+                value={fAssignee}
+                onChange={(e) => setFAssignee(e.target.value)}
+              >
+                <option value="">Any assignee</option>
+                <option value="none">Unassigned</option>
+                <option value={user.id}>Assigned to me</option>
+              </select>
+            )}
+            {(fSearch || fStatus || fPriority || fUnit || fAssignee) && (
+              <button
+                className="px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-100"
+                onClick={() => {
+                  setFSearch("");
+                  setFStatus("");
+                  setFPriority("");
+                  setFUnit("");
+                  setFAssignee("");
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
           {tickets.length === 0 ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-slate-500">
-              No tickets yet. Create the first one above.
+              {fSearch || fStatus || fPriority || fUnit || fAssignee
+                ? "No tickets match these filters."
+                : "No tickets yet. Create the first one above."}{" "}
             </div>
           ) : (
             <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-x-auto">
