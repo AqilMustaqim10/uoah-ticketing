@@ -9,6 +9,7 @@ import { requireAuth, requireRole, signToken } from "./auth";
 import type { AuthUser } from "./auth";
 import { sendTicketAck } from "./mailer";
 import { accountsRouter } from "./accounts";
+import { adminRouter } from "./adminUsers";
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 app.use("/auth", accountsRouter);
+app.use("/admin", adminRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -68,7 +70,7 @@ app.post("/auth/login", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.id, u.name, u.role, u.password_hash, u.business_unit_id,
+      `SELECT u.id, u.name, u.role, u.password_hash, u.business_unit_id, u.is_active,
               bu.code AS unit_code
        FROM users u
        LEFT JOIN business_units bu ON bu.id = u.business_unit_id
@@ -80,6 +82,12 @@ app.post("/auth/login", async (req, res) => {
 
     if (!ok) {
       return res.status(401).json({ error: "Wrong email or password" });
+    }
+
+    if (!user.is_active) {
+      return res
+        .status(403)
+        .json({ error: "This account has been disabled. Contact IT." });
     }
 
     const authUser: AuthUser = {

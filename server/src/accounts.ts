@@ -235,11 +235,14 @@ accountsRouter.post("/reset/request", async (req, res) => {
   try {
     if (domainAllowed(email)) {
       const u = await pool.query(
-        "SELECT password_hash FROM users WHERE lower(email) = $1",
+        "SELECT password_hash, is_active FROM users WHERE lower(email) = $1",
         [email],
       );
-      // The "Unknown sender" account has a disabled password and must never be reset
-      if (u.rows[0] && u.rows[0].password_hash !== "!disabled!") {
+      if (
+        u.rows[0] &&
+        u.rows[0].password_hash !== "!disabled!" &&
+        u.rows[0].is_active
+      ) {
         await issueCode(email, "RESET", null);
       }
     }
@@ -262,7 +265,7 @@ accountsRouter.post("/reset/confirm", async (req, res) => {
     if (!row) return res.status(400).json({ error: "Invalid or expired code" });
 
     await pool.query(
-      "UPDATE users SET password_hash = $1 WHERE lower(email) = $2 AND password_hash <> '!disabled!'",
+      "UPDATE users SET password_hash = $1, password_changed_at = now() WHERE lower(email) = $2 AND password_hash <> '!disabled!'",
       [await bcrypt.hash(req.body.newPassword, 10), email],
     );
     res.json({ ok: true, message: "Password changed. You can log in now." });

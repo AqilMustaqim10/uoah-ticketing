@@ -5,6 +5,7 @@ import type { Tab } from "./Shell";
 import { StatusBadge, PriorityBadge } from "./Badges";
 import TicketModal from "./TicketModal";
 import AuthScreen from "./AuthScreen";
+import UsersPage from "./UsersPage";
 
 const API = "http://localhost:3000";
 
@@ -141,7 +142,6 @@ export default function App() {
     >
       {tab === "dashboard" &&
         (canManage ? <Dashboard refresh={tickets} /> : null)}
-
       {tab === "tickets" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -243,12 +243,12 @@ export default function App() {
           )}
         </div>
       )}
-
       {tab === "kb" && comingSoon("Knowledge Base")}
       {tab === "email" && comingSoon("Email Integration Hub")}
-      {tab === "users" && comingSoon("User Directory")}
+      {tab === "users" && user.role === "ADMIN" && (
+        <UsersPage meId={user.id} />
+      )}{" "}
       {tab === "settings" && comingSoon("Settings")}
-
       {openId !== null &&
         (() => {
           const t = tickets.find((x) => x.id === openId);

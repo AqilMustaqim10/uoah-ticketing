@@ -42,12 +42,7 @@ const ITEMS: { id: Tab; label: string; icon: typeof Ticket; roles: Role[] }[] =
       roles: ["ADMIN", "IT", "USER"],
     },
     { id: "email", label: "Email Hub", icon: Mail, roles: ["ADMIN", "IT"] },
-    {
-      id: "users",
-      label: "User Directory",
-      icon: Users,
-      roles: ["ADMIN", "IT"],
-    },
+    { id: "users", label: "User Directory", icon: Users, roles: ["ADMIN"] },
     { id: "settings", label: "Settings", icon: Settings, roles: ["ADMIN"] },
   ];
 

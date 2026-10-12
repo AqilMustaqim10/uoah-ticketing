@@ -74,7 +74,7 @@ export async function sendRejection(to: string) {
       "Hello,\n\n" +
       "We received your email, but your address is not registered in the IT Helpdesk, " +
       "so no ticket was created.\n\n" +
-      "Please ask the IT department to create an account for you, " +
+      "Please register at the IT Helpdesk with your company email, " +
       "then send your request again.\n\n" +
       "This is an automatic message. Please do not reply to it.\n",
     headers: {

@@ -53,7 +53,7 @@ export async function decide(mail: ParsedMail): Promise<Decision> {
 
   // Who is the sender? (null if not a known user)
   const senderRes = await pool.query(
-    "SELECT id, role, business_unit_id FROM users WHERE lower(email) = $1",
+    "SELECT id, role, business_unit_id FROM users WHERE lower(email) = $1 AND is_active",
     [mail.from],
   );
   const sender = senderRes.rows[0] ?? null;
