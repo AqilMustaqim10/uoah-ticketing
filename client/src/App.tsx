@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Dashboard from "./Dashboard";
 import Shell, { loadTab, saveTab } from "./Shell";
 import type { Tab } from "./Shell";
+import { StatusBadge, PriorityBadge } from "./Badges";
 
 const API = "http://localhost:3000";
 
@@ -288,25 +289,36 @@ export default function App() {
 
   if (!user) {
     return (
-      <div
-        style={{ maxWidth: 360, margin: "4rem auto", fontFamily: "sans-serif" }}
-      >
-        <h1>UOA Helpdesk</h1>
-        <form onSubmit={handleLogin} style={{ display: "grid", gap: 8 }}>
-          <input
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button type="submit">Log in</button>
-          {error && <p style={{ color: "red" }}>{error}</p>}
-        </form>
+      <div className="min-h-screen bg-slate-50 grid place-items-center p-4">
+        <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-xs p-6">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white grid place-items-center font-bold mb-4">
+            U
+          </div>
+          <h1 className="text-xl font-semibold text-slate-900">UOA Helpdesk</h1>
+          <p className="text-sm text-slate-500 mb-4">Sign in to continue</p>
+          <form onSubmit={handleLogin} className="space-y-3">
+            <input
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <input
+              type="password"
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
+            >
+              Log in
+            </button>
+            {error && <p className="text-sm text-rose-600">{error}</p>}
+          </form>
+        </div>
       </div>
     );
   }
@@ -334,69 +346,135 @@ export default function App() {
         (canManage ? <Dashboard refresh={tickets} /> : null)}
 
       {tab === "tickets" && (
-        <div style={{ maxWidth: 700 }}>
-          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 8 }}>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-semibold text-slate-900">
+              Tickets ({tickets.length})
+            </h1>
+            {canManage && (
+              <button
+                onClick={downloadCsv}
+                className="px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-100"
+              >
+                Export CSV
+              </button>
+            )}
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="bg-white border border-slate-200 rounded-2xl shadow-xs p-4 grid gap-2"
+          >
             <input
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
               placeholder="Title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
             <textarea
+              className="px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600"
               placeholder="Describe the problem"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-            <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-            >
-              <option>LOW</option>
-              <option>MEDIUM</option>
-              <option>HIGH</option>
-              <option>URGENT</option>
-            </select>
-            <button type="submit">Create ticket</button>
-          </form>
-          {error && <p style={{ color: "red" }}>{error}</p>}
-
-          <h2>
-            Tickets ({tickets.length}){" "}
-            {canManage && <button onClick={downloadCsv}>Export CSV</button>}
-          </h2>
-          {tickets.map((t) => (
-            <div
-              key={t.id}
-              style={{
-                border: "1px solid #ccc",
-                padding: 8,
-                marginBottom: 8,
-                background: "white",
-              }}
-            >
-              <strong>
-                #{t.id} {t.title}
-              </strong>{" "}
-              [{t.priority}] ({t.status}) {t.unit_code}
-              <p>{t.description}</p>
-              <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                {canManage &&
-                  TRANSITIONS[t.status]?.map((next) => (
-                    <button key={next} onClick={() => changeStatus(t.id, next)}>
-                      Move to {next}
-                    </button>
-                  ))}
-                <button
-                  onClick={() => setOpenId(openId === t.id ? null : t.id)}
-                >
-                  {openId === t.id ? "Hide details" : "Details"}
-                </button>
-              </div>
-              <small>{new Date(t.created_at).toLocaleString()}</small>
-              {openId === t.id && (
-                <TicketDetail ticketId={t.id} canManage={canManage} />
-              )}
+            <div className="flex gap-2">
+              <select
+                className="px-3 py-2 text-sm rounded-lg border border-slate-200"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+              >
+                <option>LOW</option>
+                <option>MEDIUM</option>
+                <option>HIGH</option>
+                <option>URGENT</option>
+              </select>
+              <button
+                type="submit"
+                className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
+              >
+                Create ticket
+              </button>
             </div>
-          ))}
+            {error && <p className="text-sm text-rose-600">{error}</p>}
+          </form>
+
+          {tickets.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-slate-500">
+              No tickets yet. Create the first one above.
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-left">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">Ticket</th>
+                    <th className="px-4 py-2 font-medium">Title</th>
+                    <th className="px-4 py-2 font-medium">Unit</th>
+                    <th className="px-4 py-2 font-medium">Priority</th>
+                    <th className="px-4 py-2 font-medium">Status</th>
+                    <th className="px-4 py-2 font-medium">Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tickets.map((t) => (
+                    <>
+                      <tr
+                        key={t.id}
+                        onClick={() => setOpenId(openId === t.id ? null : t.id)}
+                        className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
+                      >
+                        <td className="px-4 py-2 font-mono text-slate-600">
+                          HD-{t.id}
+                        </td>
+                        <td className="px-4 py-2 text-slate-900">{t.title}</td>
+                        <td className="px-4 py-2 text-slate-600">
+                          {t.unit_code}
+                        </td>
+                        <td className="px-4 py-2">
+                          <PriorityBadge priority={t.priority} />
+                        </td>
+                        <td className="px-4 py-2">
+                          <StatusBadge status={t.status} />
+                        </td>
+                        <td className="px-4 py-2 text-slate-500">
+                          {new Date(t.created_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                      {openId === t.id && (
+                        <tr
+                          key={`d${t.id}`}
+                          className="border-t border-slate-100 bg-slate-50"
+                        >
+                          <td colSpan={6} className="px-4 py-3">
+                            <p className="text-slate-700 whitespace-pre-wrap mb-3">
+                              {t.description}
+                            </p>
+                            {canManage && TRANSITIONS[t.status]?.length > 0 && (
+                              <div className="flex gap-2 mb-3">
+                                {TRANSITIONS[t.status].map((next) => (
+                                  <button
+                                    key={next}
+                                    onClick={() => changeStatus(t.id, next)}
+                                    className="px-3 py-1 text-xs rounded-lg border border-slate-200 bg-white hover:bg-slate-100"
+                                  >
+                                    Move to {next.replace("_", " ")}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            <TicketDetail
+                              ticketId={t.id}
+                              canManage={canManage}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

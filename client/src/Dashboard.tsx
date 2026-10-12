@@ -10,27 +10,58 @@ type Stats = {
   overdueIds: number[];
 };
 
-function Box({
+function Kpi({
   label,
   value,
-  red,
+  tone,
 }: {
   label: string;
   value: number;
-  red?: boolean;
+  tone: string;
 }) {
   return (
-    <div
-      style={{
-        border: "1px solid #ccc",
-        padding: "6px 12px",
-        minWidth: 90,
-        textAlign: "center",
-        background: red && value > 0 ? "#ffe0e0" : "white",
-      }}
-    >
-      <div style={{ fontSize: 22, fontWeight: "bold" }}>{value}</div>
-      <small>{label}</small>
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={`text-3xl font-semibold mt-1 ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
+function Breakdown({
+  title,
+  data,
+  keys,
+}: {
+  title: string;
+  data: Record<string, number>;
+  keys?: string[];
+}) {
+  const list = keys ?? Object.keys(data);
+  const max = Math.max(1, ...list.map((k) => data[k] ?? 0));
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+      <h3 className="text-sm font-semibold text-slate-900 mb-3">{title}</h3>
+      <div className="space-y-2">
+        {list.map((k) => (
+          <div key={k} className="flex items-center gap-2 text-sm">
+            <span className="w-24 text-slate-600 truncate">
+              {k.replace("_", " ")}
+            </span>
+            <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-600"
+                style={{ width: `${((data[k] ?? 0) / max) * 100}%` }}
+              />
+            </div>
+            <span className="w-8 text-right text-slate-900 font-medium">
+              {data[k] ?? 0}
+            </span>
+          </div>
+        ))}
+        {list.length === 0 && (
+          <p className="text-sm text-slate-400">No data yet</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -46,47 +77,58 @@ export default function Dashboard({ refresh }: { refresh: unknown }) {
       .catch(() => setStats(null));
   }, [refresh]);
 
-  if (!stats) return null;
+  if (!stats) return <p className="text-slate-500">Loading...</p>;
 
-  const row = (
-    title: string,
-    data: Record<string, number>,
-    keys?: string[],
-  ) => (
-    <div style={{ marginBottom: 8 }}>
-      <small>{title}</small>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {(keys ?? Object.keys(data)).map((k) => (
-          <Box key={k} label={k} value={data[k] ?? 0} />
-        ))}
-      </div>
-    </div>
-  );
+  const total = Object.values(stats.byStatus).reduce((a, b) => a + b, 0);
 
   return (
-    <div style={{ background: "#f6f6f6", padding: 10, margin: "12px 0" }}>
-      <h2 style={{ marginTop: 0 }}>Dashboard</h2>
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        <Box label="OVERDUE" value={stats.overdue} red />
-      </div>
-      {stats.overdueIds.length > 0 && (
-        <p style={{ color: "#b00020", marginTop: 0 }}>
-          Overdue tickets: {stats.overdueIds.map((id) => `#${id}`).join(", ")}
-        </p>
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold text-slate-900">Dashboard</h1>
+
+      {stats.overdue > 0 && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl px-4 py-3 text-sm">
+          <strong>{stats.overdue} overdue</strong>:{" "}
+          {stats.overdueIds.map((id) => `#${id}`).join(", ")}
+        </div>
       )}
-      {row("By status", stats.byStatus, [
-        "OPEN",
-        "IN_PROGRESS",
-        "RESOLVED",
-        "CLOSED",
-      ])}
-      {row("By priority", stats.byPriority, [
-        "URGENT",
-        "HIGH",
-        "MEDIUM",
-        "LOW",
-      ])}
-      {row("By business unit", stats.byUnit)}
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <Kpi label="Total tickets" value={total} tone="text-slate-900" />
+        <Kpi
+          label="Open"
+          value={stats.byStatus.OPEN ?? 0}
+          tone="text-emerald-600"
+        />
+        <Kpi
+          label="In progress"
+          value={stats.byStatus.IN_PROGRESS ?? 0}
+          tone="text-amber-600"
+        />
+        <Kpi
+          label="Resolved"
+          value={stats.byStatus.RESOLVED ?? 0}
+          tone="text-emerald-600"
+        />
+        <Kpi
+          label="Urgent"
+          value={stats.byPriority.URGENT ?? 0}
+          tone="text-rose-600"
+        />
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-3">
+        <Breakdown
+          title="By status"
+          data={stats.byStatus}
+          keys={["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]}
+        />
+        <Breakdown
+          title="By priority"
+          data={stats.byPriority}
+          keys={["URGENT", "HIGH", "MEDIUM", "LOW"]}
+        />
+        <Breakdown title="By business unit" data={stats.byUnit} />
+      </div>
     </div>
   );
 }
