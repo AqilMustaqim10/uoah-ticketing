@@ -149,9 +149,10 @@ async function findScopedTicket(user: AuthUser, id: number): Promise<boolean> {
 }
 
 const TICKET_SELECT = `
-  SELECT t.*, bu.code AS unit_code
+  SELECT t.*, bu.code AS unit_code, a.name AS assignee_name
   FROM tickets t
   LEFT JOIN business_units bu ON bu.id = t.business_unit_id
+  LEFT JOIN users a ON a.id = t.assigned_to
 `;
 
 // ---------- Tickets ----------
@@ -409,14 +410,17 @@ app.get(
 app.get("/stats", requireAuth, requireRole("ADMIN", "IT"), async (req, res) => {
   const scope = ticketScope(req.user!, 1);
 
-  // Hours allowed before a ticket counts as overdue, by priority
+  // A manual due date wins. Without one, fall back to the priority rule.
   const OVERDUE = `
     t.status IN ('OPEN', 'IN_PROGRESS')
-    AND t.created_at < now() - (CASE t.priority
-      WHEN 'URGENT' THEN interval '4 hours'
-      WHEN 'HIGH'   THEN interval '8 hours'
-      WHEN 'MEDIUM' THEN interval '24 hours'
-      ELSE interval '72 hours' END)
+    AND (CASE
+      WHEN t.due_at IS NOT NULL THEN t.due_at < now()
+      ELSE t.created_at < now() - (CASE t.priority
+        WHEN 'URGENT' THEN interval '4 hours'
+        WHEN 'HIGH'   THEN interval '8 hours'
+        WHEN 'MEDIUM' THEN interval '24 hours'
+        ELSE interval '72 hours' END)
+    END)
   `;
 
   try {
@@ -527,6 +531,177 @@ app.get(
       );
       // The BOM makes Excel read accents and other characters correctly
       res.send("\uFEFF" + lines.join("\r\n"));
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Database error" });
+    }
+  },
+);
+
+// ---------- Assignment and due date (IT and ADMIN only) ----------
+
+// Who can this ticket be assigned to?
+app.get(
+  "/tickets/:id/assignees",
+  requireAuth,
+  requireRole("ADMIN", "IT"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id))
+      return res.status(400).json({ error: "Invalid ticket id" });
+
+    const scope = ticketScope(req.user!, 2);
+    try {
+      const t = await pool.query(
+        `SELECT t.business_unit_id FROM tickets t WHERE t.id = $1 AND ${scope.sql}`,
+        [id, ...scope.params],
+      );
+      if (t.rows.length === 0)
+        return res.status(404).json({ error: "Ticket not found" });
+
+      const r = await pool.query(
+        `SELECT id, name, role FROM users
+       WHERE is_active AND password_hash <> '!disabled!'
+         AND (role = 'ADMIN' OR (role = 'IT' AND business_unit_id = $1))
+       ORDER BY name`,
+        [t.rows[0].business_unit_id],
+      );
+      res.json(r.rows);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Database error" });
+    }
+  },
+);
+
+app.patch(
+  "/tickets/:id",
+  requireAuth,
+  requireRole("ADMIN", "IT"),
+  async (req, res) => {
+    const user = req.user!;
+    const id = Number(req.params.id);
+    const body = req.body ?? {};
+    const hasAssignee = "assignedTo" in body;
+    const hasDue = "dueAt" in body;
+
+    if (!Number.isInteger(id))
+      return res.status(400).json({ error: "Invalid ticket id" });
+    if (!hasAssignee && !hasDue)
+      return res.status(400).json({ error: "Nothing to change" });
+    if (
+      hasAssignee &&
+      body.assignedTo !== null &&
+      !Number.isInteger(body.assignedTo)
+    ) {
+      return res.status(400).json({ error: "Invalid assignee" });
+    }
+
+    let dueAt: Date | null = null;
+    if (hasDue && body.dueAt !== null) {
+      if (typeof body.dueAt !== "string")
+        return res.status(400).json({ error: "Invalid due date" });
+      dueAt = new Date(body.dueAt);
+      if (isNaN(dueAt.getTime()))
+        return res.status(400).json({ error: "Invalid due date" });
+      if (dueAt.getTime() > Date.now() + 2 * 365 * 24 * 3600 * 1000) {
+        return res.status(400).json({ error: "Due date is too far away" });
+      }
+    }
+
+    const scope = ticketScope(user, 2);
+    try {
+      const outcome: Outcome = await inTransaction(async (client) => {
+        const cur = await client.query(
+          `SELECT t.id, t.status, t.business_unit_id, t.assigned_to, t.due_at,
+                a.name AS assignee_name
+         FROM tickets t
+         LEFT JOIN users a ON a.id = t.assigned_to
+         WHERE t.id = $1 AND ${scope.sql}
+         FOR UPDATE OF t`,
+          [id, ...scope.params],
+        );
+        const row = cur.rows[0];
+        if (!row) return { code: 404, body: { error: "Ticket not found" } };
+        if (row.status === "CLOSED") {
+          return {
+            code: 400,
+            body: { error: "Closed tickets cannot be changed" },
+          };
+        }
+
+        let newAssignee: number | null = row.assigned_to;
+        let newName: string | null = row.assignee_name;
+        if (hasAssignee) {
+          newAssignee = body.assignedTo;
+          newName = null;
+          if (newAssignee !== null) {
+            // The server re-checks who may be assigned, whatever the browser sent
+            const a = await client.query(
+              `SELECT name FROM users
+             WHERE id = $1 AND is_active AND password_hash <> '!disabled!'
+               AND (role = 'ADMIN' OR (role = 'IT' AND business_unit_id = $2))`,
+              [newAssignee, row.business_unit_id],
+            );
+            if (a.rows.length === 0) {
+              return {
+                code: 400,
+                body: {
+                  error: "That person cannot be assigned to this ticket",
+                },
+              };
+            }
+            newName = a.rows[0].name;
+          }
+        }
+
+        const oldDueMs = row.due_at ? new Date(row.due_at).getTime() : null;
+        const newDue: Date | null = hasDue
+          ? dueAt
+          : row.due_at
+            ? new Date(row.due_at)
+            : null;
+
+        const assigneeChanged = hasAssignee && newAssignee !== row.assigned_to;
+        const dueChanged =
+          hasDue && (newDue ? newDue.getTime() : null) !== oldDueMs;
+
+        if (dueChanged && newDue && newDue.getTime() < Date.now()) {
+          return {
+            code: 400,
+            body: { error: "Due date must be in the future" },
+          };
+        }
+        if (!assigneeChanged && !dueChanged) {
+          return {
+            code: 200,
+            body: {
+              id: row.id,
+              assigned_to: row.assigned_to,
+              due_at: row.due_at,
+            },
+          };
+        }
+
+        const updated = await client.query(
+          "UPDATE tickets SET assigned_to = $1, due_at = $2 WHERE id = $3 RETURNING id, assigned_to, due_at",
+          [newAssignee, newDue, id],
+        );
+
+        const details: Record<string, unknown> = {};
+        if (assigneeChanged)
+          details.assignee = { from: row.assignee_name, to: newName };
+        if (dueChanged) {
+          details.dueAt = {
+            from: row.due_at,
+            to: newDue ? newDue.toISOString() : null,
+          };
+        }
+        await audit(client, id, user.id, "TICKET_UPDATED", details);
+
+        return { code: 200, body: updated.rows[0] };
+      });
+      res.status(outcome.code).json(outcome.body);
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Database error" });

@@ -21,6 +21,9 @@ export type ModalTicket = {
   unit_code: string | null;
   source?: string;
   requester_email?: string | null;
+  assigned_to?: number | null;
+  assignee_name?: string | null;
+  due_at?: string | null;
 };
 
 type Comment = {
@@ -57,6 +60,27 @@ function describe(e: AuditEntry): string {
       return `changed status from ${d.from} to ${d.to}`;
     case "COMMENT_ADDED":
       return d.internal ? "added an internal note" : "added a comment";
+    case "TICKET_UPDATED": {
+      const parts: string[] = [];
+      const a = d.assignee as
+        | { from: string | null; to: string | null }
+        | undefined;
+      const due = d.dueAt as
+        | { from: string | null; to: string | null }
+        | undefined;
+      if (a)
+        parts.push(
+          a.to ? `assigned the ticket to ${a.to}` : "removed the assignee",
+        );
+      if (due) {
+        parts.push(
+          due.to
+            ? `set the due date to ${new Date(due.to).toLocaleString()}`
+            : "cleared the due date",
+        );
+      }
+      return parts.join(" and ");
+    }
     default:
       return e.action;
   }
@@ -84,6 +108,16 @@ type Props = {
   onChanged: () => void; // tells the list to reload
 };
 
+// ISO date -> value for <input type="datetime-local"> in the user's own time zone
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+type Assignee = { id: number; name: string; role: string };
+
 export default function TicketModal({
   ticket,
   canManage,
@@ -96,6 +130,10 @@ export default function TicketModal({
   const [body, setBody] = useState("");
   const [internal, setInternal] = useState(false);
   const [error, setError] = useState("");
+  const [assignees, setAssignees] = useState<Assignee[]>([]);
+  const [assignedTo, setAssignedTo] = useState("");
+  const [dueLocal, setDueLocal] = useState("");
+  const [saving, setSaving] = useState(false);
 
   async function load() {
     const c = await api(`/tickets/${ticket.id}/comments`);
@@ -118,6 +156,17 @@ export default function TicketModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  useEffect(() => {
+    setAssignedTo(ticket.assigned_to ? String(ticket.assigned_to) : "");
+    setDueLocal(toLocalInput(ticket.due_at));
+    if (canManage) {
+      api(`/tickets/${ticket.id}/assignees`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then(setAssignees)
+        .catch(() => setAssignees([]));
+    }
+  }, [ticket.id]);
+
   async function addComment(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -135,18 +184,29 @@ export default function TicketModal({
     load();
   }
 
-  async function changeStatus(status: string) {
+  async function saveDetails() {
     setError("");
-    const res = await api(`/tickets/${ticket.id}/status`, {
+    setSaving(true);
+    const res = await api(`/tickets/${ticket.id}`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({
+        assignedTo: assignedTo === "" ? null : Number(assignedTo),
+        dueAt: dueLocal === "" ? null : new Date(dueLocal).toISOString(),
+      }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    setSaving(false);
     if (!res.ok) {
-      setError(data.error ?? "Something went wrong");
+      setError(data.error ?? "Could not save");
       return;
     }
-    setCurrent({ ...current, status: data.status });
+    setCurrent({
+      ...current,
+      assigned_to: data.assigned_to,
+      assignee_name:
+        assignees.find((a) => a.id === data.assigned_to)?.name ?? null,
+      due_at: data.due_at,
+    });
     load();
     onChanged();
   }
@@ -287,18 +347,49 @@ export default function TicketModal({
             <Field label="Status">
               <StatusBadge status={current.status} />
             </Field>
-            {canManage && TRANSITIONS[current.status]?.length > 0 && (
-              <div className="flex flex-col gap-2">
-                {TRANSITIONS[current.status].map((next) => (
-                  <button
-                    key={next}
-                    onClick={() => changeStatus(next)}
-                    className="px-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-left"
+            {canManage && current.status !== "CLOSED" ? (
+              <>
+                <Field label="Assigned to">
+                  <select
+                    className="w-full px-2 py-1.5 text-sm rounded-lg border border-slate-200 bg-white"
+                    value={assignedTo}
+                    onChange={(e) => setAssignedTo(e.target.value)}
                   >
-                    Move to {next.replace("_", " ")}
-                  </button>
-                ))}
-              </div>
+                    <option value="">Unassigned</option>
+                    {assignees.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.role})
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Due date">
+                  <input
+                    type="datetime-local"
+                    className="w-full px-2 py-1.5 text-sm rounded-lg border border-slate-200 bg-white"
+                    value={dueLocal}
+                    onChange={(e) => setDueLocal(e.target.value)}
+                  />
+                </Field>
+                <button
+                  onClick={saveDetails}
+                  disabled={saving}
+                  className="w-full px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : "Save assignment and due date"}
+                </button>
+              </>
+            ) : (
+              <>
+                <Field label="Assigned to">
+                  {current.assignee_name ?? "Unassigned"}
+                </Field>
+                <Field label="Due date">
+                  {current.due_at
+                    ? new Date(current.due_at).toLocaleString()
+                    : "None"}
+                </Field>
+              </>
             )}
             <Field label="Priority">
               <PriorityBadge priority={current.priority} />
